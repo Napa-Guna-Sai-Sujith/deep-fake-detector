@@ -76,33 +76,20 @@ This project aims to:
 4. The system classifies the media as Real or Fake.
 5. Prediction results with confidence score are displayed to the user.
 
-   
 ## Installation
-### Clone the Repository
-```bash
-git clone https://github.com/your-username/AI-DeepFake-Detector.git
-```
-### Navigate to Project Folder
-```bash
-cd AI-DeepFake-Detector
-```
-### Install Frontend Dependencies
+
+### Install the Required Software
+- Install Node.js from:
+https://nodejs.org
+
+### Install Required Dependencies
 ```bash
 npm install
 ```
-### Install Backend Dependencies
+### Run the Project
 ```bash
-pip install -r requirements.txt
+npm run dev
 ```
-### Run Frontend
-```bash
-npm start
-```
-### Run Backend
-```bash
-python app.py
-```
----
 ## Conclusion
 
 The AI-Based Deep Fake Detector provides a smart and reliable solution for identifying manipulated digital media using Artificial Intelligence and Machine Learning.
