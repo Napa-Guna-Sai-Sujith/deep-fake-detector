@@ -1,6 +1,6 @@
 # 🛡️ AI-Based Deep Fake Detector
 
-An intelligent AI-powered web application that detects whether uploaded images, videos, and audio files are genuine or AI-generated using Deep Learning and Machine Learning techniques.
+An intelligent AI-powered web application that detects whether uploaded images, videos, and audio files are genuine or AI-generated using Deep Learning, Signal Processing, and Multi-Modal Feature Fusion with Neon Serverless Postgres integration.
 
 ---
 ## Problem Statement
@@ -34,12 +34,12 @@ This project aims to:
 - 🖼️ Image Deepfake Detection
 - 🎥 Video Deepfake Detection
 - 🎙️ Audio Deepfake Detection
-- 🤖 AI-Powered Classification
-- 📊 Confidence Score Display
+- 🤖 Multi-Modal AI Classification & Confidence Scoring
+- 🗄️ **Neon Serverless PostgreSQL Database Integration** for secure user authentication & scan history logging
 - 🌐 Responsive Web Interface
 - 📁 Drag-and-Drop Upload Support
-- ⚡ Real-Time Analysis
-- 🔒 Secure File Processing
+- ⚡ Real-Time In-Browser Signal Analysis & Metrics
+- 🔒 Secure User Authentication & Session Persistence
 - 📱 Mobile-Friendly Design
 
 ---
@@ -47,52 +47,63 @@ This project aims to:
 ## 🛠️ Technologies Used
 
 ### Frontend
-- HTML5
-- CSS3
-- JavaScript
-- React.js
+- HTML5 & CSS3
+- TypeScript
+- React 19
+- Tailwind CSS
+- Lucide Icons & Recharts
 
-### Backend
-- Node.js
-- Express.js
+### Backend & Database
+- Node.js & Express.js
+- **Neon PostgreSQL (@neondatabase/serverless)**
+- Dotenv & CORS
 
-### Artificial Intelligence
-- Python
-- TensorFlow / Keras
-- OpenCV
-- NumPy
-- Pandas
+### Signal & AI Analysis
+- Web Audio API (Spectral Flatness, ZCR, MFCCs, Spectral Centroid)
+- Canvas Sobel & Temporal Consistency Analysis
+- Multi-Modal Fusion Engine
 
-### Development Tools
-- Git & GitHub
-- Visual Studio Code
-- npm
 ---
 
-## Working Process
-1. User uploads an image, video, or audio file.
-2. The backend securely processes the uploaded media.
-3. AI/ML models analyze patterns, inconsistencies, and manipulations.
-4. The system classifies the media as Real or Fake.
-5. Prediction results with confidence score are displayed to the user.
+## ⚙️ Environment Variables & Neon Database
 
-## Installation
+Create a `.env` file in the root directory (refer to `.env.example`):
 
-### Install the Required Software
-- Install Node.js from:
-https://nodejs.org
+```env
+PORT=3001
+DATABASE_URL=postgresql://neondb_owner:npg_E6D5qJclNGyh@ep-sparkling-pond-b56bb0cw-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+```
 
-### Install Required Dependencies
+### Database Schema
+
+The system automatically provisions:
+- `users`: User profiles with timestamps and authentication credentials.
+- `scans`: Comprehensive audit logs of all analyzed files (file name, type, verdict, confidence, audio/video scores, and spectral metrics).
+
+---
+
+## 🚀 Installation & Running
+
+### 1. Install Dependencies
 ```bash
 npm install
 ```
-### Run the Project
+
+### 2. Initialize the Database (Optional / Automatic on Server Start)
+```bash
+npm run db:init
+```
+
+### 3. Run the Fullstack Application
 ```bash
 npm run dev
 ```
+
+- **Frontend Application**: `http://localhost:5173`
+- **Backend API & Neon DB**: `http://localhost:3001`
+
+---
+
 ## Conclusion
 
-The AI-Based Deep Fake Detector provides a smart and reliable solution for identifying manipulated digital media using Artificial Intelligence and Machine Learning.
-
-The project focuses on improving digital trust, preventing misinformation, and strengthening cybersecurity by helping users verify the authenticity of online content.
-
+The AI-Based Deep Fake Detector provides a smart, reliable, and persistent solution for identifying manipulated digital media using Artificial Intelligence, Machine Learning, and Cloud Database Infrastructure.

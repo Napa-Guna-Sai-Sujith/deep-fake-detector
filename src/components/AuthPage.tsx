@@ -10,7 +10,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Sparkles,
+  Database,
 } from "lucide-react";
+import { checkNeonStatus, registerUser, loginUser } from "../services/api";
 
 /* ─── Types ─── */
 interface User {
@@ -211,6 +213,14 @@ export default function AuthPage({ onAuth }: AuthProps) {
   const [success, setSuccess] = useState("");
   const [shake, setShake] = useState(false);
 
+  const [dbStatus, setDbStatus] = useState<"checking" | "connected" | "offline">("checking");
+
+  useEffect(() => {
+    checkNeonStatus().then((res) => {
+      setDbStatus(res.connected ? "connected" : "offline");
+    });
+  }, []);
+
   const switchMode = useCallback((newMode: "login" | "register") => {
     setMode(newMode);
     setErrors({});
@@ -263,66 +273,90 @@ export default function AuthPage({ onAuth }: AuthProps) {
 
     setIsLoading(true);
 
-    // Simulate network delay
-    await new Promise((r) => setTimeout(r, 1200));
+    try {
+      if (mode === "register") {
+        const res = await registerUser(name, email, password);
+        if (!res.success) {
+          if (res.error?.includes("already exists")) {
+            setErrors({ email: res.error });
+            setIsLoading(false);
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            return;
+          }
 
-    const users = getUsers();
+          // Fallback to local storage if network / offline
+          const users = getUsers();
+          if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
+            setErrors({ email: "An account with this email already exists" });
+            setIsLoading(false);
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            return;
+          }
 
-    if (mode === "register") {
-      // Check if user already exists
-      if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
-        setErrors({ email: "An account with this email already exists" });
-        setIsLoading(false);
-        setShake(true);
-        setTimeout(() => setShake(false), 500);
-        return;
-      }
+          const newUser: User = {
+            name: name.trim(),
+            email: email.toLowerCase().trim(),
+            password,
+            registeredAt: new Date().toISOString(),
+          };
+          users.push(newUser);
+          saveUsers(users);
 
-      // Register new user
-      const newUser: User = {
-        name: name.trim(),
-        email: email.toLowerCase().trim(),
-        password,
-        registeredAt: new Date().toISOString(),
-      };
-      users.push(newUser);
-      saveUsers(users);
-
-      setSuccess("Account created successfully! Redirecting...");
-      setTimeout(() => {
-        onAuth({ name: newUser.name, email: newUser.email });
-      }, 800);
-    } else {
-      // Login
-      const user = users.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password
-      );
-
-      if (!user) {
-        // Check if it's a demo account
-        if (email === "demo@deepfakeshield.com" && password === "demo1234") {
-          setSuccess("Welcome back! Redirecting...");
+          setSuccess("Account created successfully! Redirecting...");
           setTimeout(() => {
-            onAuth({ name: "Demo User", email: "demo@deepfakeshield.com" });
-          }, 600);
-          setIsLoading(false);
+            onAuth({ name: newUser.name, email: newUser.email });
+          }, 800);
           return;
         }
 
-        setErrors({ password: "Invalid email or password" });
-        setIsLoading(false);
-        setShake(true);
-        setTimeout(() => setShake(false), 500);
-        return;
+        setSuccess("Account registered in Neon DB! Redirecting...");
+        setTimeout(() => {
+          onAuth({ name: res.user?.name || name.trim(), email: res.user?.email || email.trim() });
+        }, 800);
+      } else {
+        const res = await loginUser(email, password);
+        if (!res.success) {
+          // Check local or demo user fallback
+          const users = getUsers();
+          const user = users.find(
+            (u) => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password
+          );
+
+          if (!user) {
+            if (email === "demo@deepfakeshield.com" && password === "demo1234") {
+              setSuccess("Welcome back! Redirecting...");
+              setTimeout(() => {
+                onAuth({ name: "Demo User", email: "demo@deepfakeshield.com" });
+              }, 600);
+              return;
+            }
+
+            setErrors({ password: res.error || "Invalid email or password" });
+            setIsLoading(false);
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            return;
+          }
+
+          setSuccess("Login successful! Redirecting...");
+          setTimeout(() => {
+            onAuth({ name: user.name, email: user.email });
+          }, 600);
+          return;
+        }
+
+        setSuccess("Login successful via Neon DB! Redirecting...");
+        setTimeout(() => {
+          onAuth({ name: res.user?.name || "User", email: res.user?.email || email.trim() });
+        }, 600);
       }
-
-      setSuccess("Login successful! Redirecting...");
-      setTimeout(() => {
-        onAuth({ name: user.name, email: user.email });
-      }, 600);
+    } catch {
+      setErrors({ password: "Authentication request failed. Please check connection." });
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const pwStrength = passwordStrength(password);
@@ -352,6 +386,22 @@ export default function AuthPage({ onAuth }: AuthProps) {
             DeepFake<span className="text-cyan-400">Shield</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">Multi-Modal Deepfake Detection Platform</p>
+          
+          {/* Neon Database Status Badge */}
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-700/50 text-xs text-slate-400 backdrop-blur-md">
+            <Database className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Neon DB:</span>
+            {dbStatus === "connected" ? (
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                Connected
+              </span>
+            ) : dbStatus === "checking" ? (
+              <span className="text-yellow-400 font-medium">Checking...</span>
+            ) : (
+              <span className="text-slate-400 font-medium">Offline / Local Mode</span>
+            )}
+          </div>
         </div>
 
         {/* Auth Card */}

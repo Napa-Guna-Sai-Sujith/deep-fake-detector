@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Shield, Menu, X, LogOut, ChevronDown } from "lucide-react";
+import { Shield, Menu, X, LogOut, ChevronDown, Database } from "lucide-react";
+import { checkNeonStatus } from "../services/api";
 
 interface NavbarProps {
   user: { name: string; email: string } | null;
@@ -18,6 +19,11 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [dbConnected, setDbConnected] = useState(false);
+
+  useEffect(() => {
+    checkNeonStatus().then((res) => setDbConnected(res.connected));
+  }, []);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
@@ -73,8 +79,21 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
             ))}
           </div>
 
-          {/* User Menu */}
+          {/* Database Status & User Menu */}
           <div className="hidden md:flex items-center gap-3">
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border backdrop-blur-md transition-all ${
+                dbConnected
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                  : "bg-slate-800/60 border-slate-700/60 text-slate-400"
+              }`}
+              title={dbConnected ? "Neon DB Connected (PostgreSQL)" : "Connecting / Local Mode"}
+            >
+              <Database className="w-3 h-3" />
+              <span>{dbConnected ? "Neon DB Connected" : "Local Mode"}</span>
+              {dbConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+            </div>
+
             {user && (
               <div className="relative" onClick={(e) => e.stopPropagation()}>
                 <button

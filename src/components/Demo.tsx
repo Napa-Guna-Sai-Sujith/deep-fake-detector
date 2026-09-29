@@ -12,7 +12,9 @@ import {
   RotateCcw,
   Info,
   Volume2,
+  Database,
 } from "lucide-react";
+import { saveScanToDb } from "../services/api";
 
 type Modality = "audio" | "video" | "both";
 
@@ -595,6 +597,32 @@ export default function Demo() {
 
         finalResult.fileName = name;
         finalResult.fileSize = file ? formatFileSize(file.size) : `${(Math.random() * 5 + 1).toFixed(1)} MB`;
+
+        // Save scan record to Neon DB
+        try {
+          const authUser = JSON.parse(localStorage.getItem("df_auth_user") || "{}");
+          saveScanToDb({
+            userEmail: authUser.email,
+            fileName: finalResult.fileName,
+            fileType: modality,
+            fileSize: finalResult.fileSize,
+            verdict: finalResult.label,
+            confidence: finalResult.confidence,
+            audioScore: finalResult.audioScore,
+            videoScore: finalResult.videoScore,
+            fusedScore: finalResult.fusedScore,
+            details: {
+              spectralFlatness: finalResult.spectralFlatness,
+              zeroCrossingRate: finalResult.zeroCrossingRate,
+              spectralCentroid: finalResult.spectralCentroid,
+              harmonicRatio: finalResult.harmonicRatio,
+              temporalConsistency: finalResult.temporalConsistency,
+              artifactScore: finalResult.artifactScore,
+            },
+          }).catch(() => {});
+        } catch {
+          // Ignore
+        }
 
         setTimeout(() => {
           setResult(finalResult);
