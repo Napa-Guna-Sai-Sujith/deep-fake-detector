@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { saveScanToDb } from "../services/api";
 
-type Modality = "audio" | "video" | "both";
+type Modality = "audio" | "video" | "image" | "both";
 
 interface AnalysisResult {
   label: "Real" | "Fake";
@@ -297,54 +297,130 @@ async function analyzeVideoFile(file: File): Promise<{
   });
 }
 
-/* ─── Score Computation ─── */
-function computeDetectionScore(audioFeatures: Awaited<ReturnType<typeof analyzeAudioFile>> | null, videoFeatures: Awaited<ReturnType<typeof analyzeVideoFile>> | null, modality: Modality): AnalysisResult {
-  // Heuristic-based scoring that mimics real deepfake detection
-  // Real audio tends to have: higher harmonic ratio, natural spectral flatness, varied spectral flux
-  // Fake audio tends to have: unnaturally flat spectra, low harmonic ratio, uniform spectral flux
+/* ─── Image Analysis via Canvas ─── */
+async function analyzeImageFile(file: File): Promise<{
+  artifactScore: number;
+  temporalConsistency: number;
+  spectralFlatness: number;
+  frequencyBands: number[];
+  spectralFlux: number[];
+  dimensions: string;
+}> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.src = url;
 
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d")!;
+      canvas.width = 256;
+      canvas.height = 256;
+      ctx.drawImage(img, 0, 0, 256, 256);
+      const imageData = ctx.getImageData(0, 0, 256, 256);
+      const data = imageData.data;
+      URL.revokeObjectURL(url);
+
+      let totalGradient = 0;
+      let checkerboardEnergy = 0;
+      const gray = new Float32Array(256 * 256);
+
+      for (let i = 0; i < 256 * 256; i++) {
+        const r = data[i * 4];
+        const g = data[i * 4 + 1];
+        const b = data[i * 4 + 2];
+        gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      }
+
+      // Detect high-frequency boundary seams & GAN checkerboard patterns
+      for (let y = 2; y < 254; y++) {
+        for (let x = 2; x < 254; x++) {
+          const idx = y * 256 + x;
+          const laplacian = Math.abs(gray[idx - 1] + gray[idx + 1] + gray[idx - 256] + gray[idx + 256] - 4 * gray[idx]);
+          totalGradient += laplacian;
+
+          if ((x + y) % 4 === 0) {
+            checkerboardEnergy += Math.abs(gray[idx] - gray[idx - 1]);
+          }
+        }
+      }
+
+      const avgGradient = totalGradient / (252 * 252 * 255);
+      const checkerRatio = (checkerboardEnergy / (252 * 252 * 255)) * 4;
+      const artifactScore = Math.min(1, Math.max(0, checkerRatio * 1.5 + (avgGradient < 0.05 ? 0.3 : 0.05)));
+      const consistency = Math.min(1, Math.max(0, 1 - artifactScore));
+
+      const frequencyBands = Array.from({ length: 20 }, (_, i) => Math.max(0.1, Math.sin((i / 20) * Math.PI) * (1 - artifactScore * 0.3)));
+      const spectralFlux = Array.from({ length: 20 }, (_, i) => Math.max(0.1, (gray[i * 200] || 128) / 255));
+
+      resolve({
+        artifactScore,
+        temporalConsistency: consistency,
+        spectralFlatness: artifactScore * 0.4,
+        frequencyBands,
+        spectralFlux,
+        dimensions: `${img.naturalWidth || 256}x${img.naturalHeight || 256}`,
+      });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({
+        artifactScore: 0.5,
+        temporalConsistency: 0.5,
+        spectralFlatness: 0.5,
+        frequencyBands: Array(20).fill(0.5),
+        spectralFlux: Array(20).fill(0.5),
+        dimensions: "Unknown",
+      });
+    };
+  });
+}
+
+/* ─── Score Computation ─── */
+function computeDetectionScore(
+  audioFeatures: Awaited<ReturnType<typeof analyzeAudioFile>> | null,
+  videoFeatures: Awaited<ReturnType<typeof analyzeVideoFile>> | null,
+  imageFeatures: Awaited<ReturnType<typeof analyzeImageFile>> | null,
+  modality: Modality
+): AnalysisResult {
   let audioScore = 0.5;
   if (audioFeatures) {
     const { spectralFlatness, zeroCrossingRate, harmonicRatio, spectralFlux, spectralCentroid } = audioFeatures;
-
-    // Higher harmonic ratio = more likely real (natural voice periodicity)
-    const harmonicScore = harmonicRatio > 0.4 ? 0.8 : harmonicRatio > 0.2 ? 0.6 : 0.3;
-
-    // Natural spectral flatness (not too flat, not too peaky)
-    const flatnessScore = spectralFlatness < 0.01 ? 0.8 : spectralFlatness < 0.1 ? 0.6 : 0.3;
-
-    // ZCR in natural range
-    const zcrScore = zeroCrossingRate > 0.02 && zeroCrossingRate < 0.15 ? 0.8 : 0.4;
-
-    // Spectral flux variance (real speech has high variance)
+    const harmonicScore = harmonicRatio > 0.4 ? 0.85 : harmonicRatio > 0.2 ? 0.6 : 0.25;
+    const flatnessScore = spectralFlatness < 0.01 ? 0.85 : spectralFlatness < 0.1 ? 0.6 : 0.25;
+    const zcrScore = zeroCrossingRate > 0.02 && zeroCrossingRate < 0.15 ? 0.8 : 0.35;
     const fluxMean = spectralFlux.reduce((a, b) => a + b, 0) / spectralFlux.length;
     const fluxVar = spectralFlux.reduce((a, b) => a + (b - fluxMean) ** 2, 0) / spectralFlux.length;
-    const fluxScore = fluxVar > 0.01 ? 0.8 : 0.4;
-
-    // Spectral centroid in natural speech range (200-4000 Hz region)
-    const centroidScore = spectralCentroid > 0.05 && spectralCentroid < 0.5 ? 0.75 : 0.4;
+    const fluxScore = fluxVar > 0.01 ? 0.8 : 0.35;
+    const centroidScore = spectralCentroid > 0.05 && spectralCentroid < 0.5 ? 0.8 : 0.35;
 
     audioScore = (harmonicScore * 0.3 + flatnessScore * 0.2 + zcrScore * 0.15 + fluxScore * 0.2 + centroidScore * 0.15);
-    audioScore = Math.max(0.05, Math.min(0.98, audioScore + (Math.random() - 0.5) * 0.05));
+    audioScore = Math.max(0.05, Math.min(0.98, audioScore));
   }
 
   let videoScore = 0.5;
   if (videoFeatures) {
     const { temporalConsistency, artifactScore, frameDiffs } = videoFeatures;
-
-    // Higher temporal consistency = more likely real
-    const temporalScore = temporalConsistency > 0.7 ? 0.85 : temporalConsistency > 0.4 ? 0.6 : 0.3;
-
-    // Lower artifact score = more likely real
-    const artifactDetectionScore = artifactScore < 0.3 ? 0.8 : artifactScore < 0.6 ? 0.55 : 0.3;
-
-    // Frame difference variance (real video has natural motion patterns)
+    const temporalScore = temporalConsistency > 0.7 ? 0.88 : temporalConsistency > 0.4 ? 0.6 : 0.25;
+    const artifactDetectionScore = artifactScore < 0.3 ? 0.85 : artifactScore < 0.6 ? 0.55 : 0.25;
     const fdMean = frameDiffs.reduce((a, b) => a + b, 0) / frameDiffs.length;
     const fdVar = frameDiffs.reduce((a, b) => a + (b - fdMean) ** 2, 0) / frameDiffs.length;
-    const motionScore = fdVar > 0.001 ? 0.75 : 0.4;
+    const motionScore = fdVar > 0.001 ? 0.8 : 0.35;
 
     videoScore = (temporalScore * 0.4 + artifactDetectionScore * 0.35 + motionScore * 0.25);
-    videoScore = Math.max(0.05, Math.min(0.98, videoScore + (Math.random() - 0.5) * 0.05));
+    videoScore = Math.max(0.05, Math.min(0.98, videoScore));
+  }
+
+  let imageScore = 0.5;
+  if (imageFeatures) {
+    const { artifactScore, temporalConsistency, spectralFlatness } = imageFeatures;
+    const artScore = artifactScore < 0.25 ? 0.88 : artifactScore < 0.5 ? 0.55 : 0.2;
+    const texScore = temporalConsistency > 0.7 ? 0.85 : temporalConsistency > 0.4 ? 0.55 : 0.25;
+    const flatScore = spectralFlatness < 0.12 ? 0.85 : 0.3;
+
+    imageScore = artScore * 0.45 + texScore * 0.35 + flatScore * 0.2;
+    imageScore = Math.max(0.05, Math.min(0.98, imageScore));
   }
 
   // Fused score
@@ -353,9 +429,18 @@ function computeDetectionScore(audioFeatures: Awaited<ReturnType<typeof analyzeA
     fusedScore = audioScore;
   } else if (modality === "video") {
     fusedScore = videoScore;
+  } else if (modality === "image") {
+    fusedScore = imageScore;
   } else {
-    fusedScore = audioScore * 0.5 + videoScore * 0.5 + 0.03; // Multi-modal bonus
-    fusedScore = Math.min(0.99, fusedScore);
+    const activeScores: number[] = [];
+    if (audioFeatures) activeScores.push(audioScore);
+    if (videoFeatures) activeScores.push(videoScore);
+    if (imageFeatures) activeScores.push(imageScore);
+    if (activeScores.length === 0) {
+      fusedScore = (audioScore + videoScore + imageScore) / 3;
+    } else {
+      fusedScore = activeScores.reduce((a, b) => a + b, 0) / activeScores.length;
+    }
   }
 
   const label: "Real" | "Fake" = fusedScore >= 0.5 ? "Real" : "Fake";
@@ -367,20 +452,20 @@ function computeDetectionScore(audioFeatures: Awaited<ReturnType<typeof analyzeA
     audioScore: audioScore * 100,
     videoScore: videoScore * 100,
     fusedScore: fusedScore * 100,
-    spectralFlatness: audioFeatures?.spectralFlatness ?? 0.5,
+    spectralFlatness: audioFeatures?.spectralFlatness ?? imageFeatures?.spectralFlatness ?? 0.5,
     zeroCrossingRate: audioFeatures?.zeroCrossingRate ?? 0.5,
     spectralCentroid: audioFeatures?.spectralCentroid ?? 0.5,
     harmonicRatio: audioFeatures?.harmonicRatio ?? 0.5,
-    temporalConsistency: videoFeatures?.temporalConsistency ?? 0.5,
-    artifactScore: videoFeatures?.artifactScore ?? 0.5,
-    frequencyBands: audioFeatures?.frequencyBands ?? Array(20).fill(0.5),
-    spectralFlux: audioFeatures?.spectralFlux ?? Array(20).fill(0.5),
+    temporalConsistency: videoFeatures?.temporalConsistency ?? imageFeatures?.temporalConsistency ?? 0.5,
+    artifactScore: videoFeatures?.artifactScore ?? imageFeatures?.artifactScore ?? 0.5,
+    frequencyBands: audioFeatures?.frequencyBands ?? imageFeatures?.frequencyBands ?? Array(20).fill(0.5),
+    spectralFlux: audioFeatures?.spectralFlux ?? imageFeatures?.spectralFlux ?? Array(20).fill(0.5),
     mfccFeatures: audioFeatures?.mfccFeatures ?? Array(13).fill(0.5),
     frameDiffs: videoFeatures?.frameDiffs ?? Array(20).fill(0.5),
     fileName: "",
     fileSize: "",
-    duration: audioFeatures ? `${audioFeatures.duration.toFixed(1)}s` : videoFeatures ? `${videoFeatures.duration.toFixed(1)}s` : "N/A",
-    sampleRate: audioFeatures ? `${audioFeatures.sampleRate} Hz` : "N/A",
+    duration: audioFeatures ? `${audioFeatures.duration.toFixed(1)}s` : videoFeatures ? `${videoFeatures.duration.toFixed(1)}s` : imageFeatures ? "Static Image" : "N/A",
+    sampleRate: audioFeatures ? `${audioFeatures.sampleRate} Hz` : imageFeatures ? imageFeatures.dimensions : "N/A",
   };
 }
 
@@ -578,12 +663,24 @@ export default function Demo() {
       try {
         let audioResult: Awaited<ReturnType<typeof analyzeAudioFile>> | null = null;
         let videoResult: Awaited<ReturnType<typeof analyzeVideoFile>> | null = null;
+        let imageResult: Awaited<ReturnType<typeof analyzeImageFile>> | null = null;
 
-        if (file && (modality === "audio" || modality === "both") && file.type.startsWith("audio")) {
-          audioResult = await analyzeAudioFile(file);
-        }
-        if (file && (modality === "video" || modality === "both") && file.type.startsWith("video")) {
-          videoResult = await analyzeVideoFile(file);
+        if (file) {
+          const isAudio = file.type.startsWith("audio") || /\.(wav|mp3|ogg|flac|m4a|aac)$/i.test(file.name);
+          const isVideo = file.type.startsWith("video") || /\.(mp4|webm|avi|mov|mkv)$/i.test(file.name);
+          const isImage = file.type.startsWith("image") || /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(file.name);
+
+          if (isAudio && (modality === "audio" || modality === "both")) {
+            audioResult = await analyzeAudioFile(file);
+          } else if (isVideo && (modality === "video" || modality === "both")) {
+            videoResult = await analyzeVideoFile(file);
+          } else if (isImage && (modality === "image" || modality === "both")) {
+            imageResult = await analyzeImageFile(file);
+          } else {
+            if (isAudio) audioResult = await analyzeAudioFile(file);
+            else if (isVideo) videoResult = await analyzeVideoFile(file);
+            else if (isImage) imageResult = await analyzeImageFile(file);
+          }
         }
 
         clearInterval(progressRef.current);
@@ -591,8 +688,8 @@ export default function Demo() {
         setAnalysisStep("Complete!");
 
         let finalResult: AnalysisResult;
-        if (audioResult || videoResult) {
-          finalResult = computeDetectionScore(audioResult, videoResult, modality);
+        if (audioResult || videoResult || imageResult) {
+          finalResult = computeDetectionScore(audioResult, videoResult, imageResult, modality);
         } else {
           // Simulated result for sample files
           finalResult = generateSimulatedResult(simLabel || "Real", modality, name);
@@ -725,20 +822,21 @@ export default function Demo() {
         {/* Modality Selector */}
         <div className="flex justify-center mb-8">
           <div className="inline-flex bg-white/5 border border-white/10 rounded-xl p-1">
-            {(["audio", "video", "both"] as Modality[]).map((m) => (
+            {(["audio", "video", "image", "both"] as Modality[]).map((m) => (
               <button
                 key={m}
                 onClick={() => { setModality(m); reset(); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   modality === m
-                    ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-white border border-cyan-500/30"
+                    ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-white border border-cyan-500/30 shadow-lg shadow-cyan-500/10"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
                 {m === "audio" && <Mic className="w-4 h-4" />}
                 {m === "video" && <Video className="w-4 h-4" />}
+                {m === "image" && <ImageIcon className="w-4 h-4" />}
                 {m === "both" && <ShieldCheck className="w-4 h-4" />}
-                {m === "audio" ? "Audio Only" : m === "video" ? "Video Only" : "Multi-Modal"}
+                {m === "audio" ? "Audio" : m === "video" ? "Video" : m === "image" ? "Image" : "Multi-Modal"}
               </button>
             ))}
           </div>
@@ -759,7 +857,15 @@ export default function Demo() {
             >
               <input
                 ref={fileRef} type="file"
-                accept={modality === "audio" ? "audio/*" : modality === "video" ? "video/*" : "audio/*,video/*"}
+                accept={
+                  modality === "audio"
+                    ? "audio/*"
+                    : modality === "video"
+                    ? "video/*"
+                    : modality === "image"
+                    ? "image/*"
+                    : "audio/*,video/*,image/*"
+                }
                 onChange={handleFileSelect} className="hidden"
               />
               <div className="flex flex-col items-center gap-3">
@@ -769,7 +875,13 @@ export default function Demo() {
                 <div>
                   <p className="text-white font-medium">Drop your file here or click to browse</p>
                   <p className="text-sm text-slate-500 mt-1">
-                    {modality === "audio" ? "WAV, MP3, OGG, FLAC" : modality === "video" ? "MP4, WebM, AVI" : "Audio & Video files"} (max 50MB)
+                    {modality === "audio"
+                      ? "WAV, MP3, OGG, FLAC"
+                      : modality === "video"
+                      ? "MP4, WebM, AVI"
+                      : modality === "image"
+                      ? "JPG, PNG, WebP"
+                      : "Audio, Video & Image files"} (max 50MB)
                   </p>
                 </div>
               </div>
@@ -778,9 +890,15 @@ export default function Demo() {
             {/* Real file analysis indicator */}
             {realFile && (
               <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15">
-                <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                {realFile.type?.startsWith("image") || /\.(jpg|jpeg|png|webp|bmp)$/i.test(realFile.name) ? (
+                  <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : realFile.type?.startsWith("video") || /\.(mp4|webm|avi|mov)$/i.test(realFile.name) ? (
+                  <Film className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                )}
                 <span className="text-xs text-emerald-300">
-                  Real file analysis active — using Web Audio API for {realFile.type || "unknown"} format
+                  Real file analysis active — in-browser processing for {realFile.name}
                 </span>
               </div>
             )}
