@@ -9,6 +9,7 @@ import {
   BarChart3,
   FileAudio,
   Film,
+  Image as ImageIcon,
   RotateCcw,
   Info,
   Volume2,
@@ -41,10 +42,12 @@ interface AnalysisResult {
 }
 
 const sampleFiles = [
-  { name: "sample_voice_01.wav", type: "audio" as const, label: "Real" as const, desc: "Clean speech recording" },
-  { name: "deepfake_audio_03.wav", type: "audio" as const, label: "Fake" as const, desc: "TTS-generated voice" },
-  { name: "video_clip_real.mp4", type: "video" as const, label: "Real" as const, desc: "Original face video" },
-  { name: "face_swap_fake.mp4", type: "video" as const, label: "Fake" as const, desc: "Face-swapped video" },
+  { name: "genuine_human_voice.wav", path: "/sample_data/audio/genuine_human_voice.wav", type: "audio" as const, label: "Real" as const, desc: "Clean natural human speech" },
+  { name: "fake_tts_synthesized.wav", path: "/sample_data/audio/fake_tts_synthesized.wav", type: "audio" as const, label: "Fake" as const, desc: "Neural TTS synthesized voice" },
+  { name: "genuine_portrait_photo.jpg", path: "/sample_data/images/genuine_portrait_photo.jpg", type: "both" as const, label: "Real" as const, desc: "Authentic portrait photograph" },
+  { name: "fake_ai_generated_face.jpg", path: "/sample_data/images/fake_ai_generated_face.jpg", type: "both" as const, label: "Fake" as const, desc: "AI generated deepfake face" },
+  { name: "genuine_interview_clip.mp4", path: "/sample_data/video/genuine_interview_clip.mp4", type: "video" as const, label: "Real" as const, desc: "Smooth natural face video" },
+  { name: "fake_deepfake_face_swap.mp4", path: "/sample_data/video/fake_deepfake_face_swap.mp4", type: "video" as const, label: "Fake" as const, desc: "Face-swapped glitch video" },
 ];
 
 /* ─── Real Audio Analysis via Web Audio API ─── */
@@ -667,7 +670,22 @@ export default function Demo() {
   );
 
   const handleSampleClick = useCallback(
-    (name: string, label: "Real" | "Fake") => {
+    async (name: string, label: "Real" | "Fake", samplePath?: string) => {
+      if (samplePath) {
+        try {
+          const res = await fetch(samplePath);
+          if (res.ok) {
+            const blob = await res.blob();
+            const mimeType = blob.type || (name.endsWith(".wav") ? "audio/wav" : name.endsWith(".mp4") ? "video/mp4" : "image/jpeg");
+            const file = new File([blob], name, { type: mimeType });
+            setRealFile(file);
+            runAnalysis(file, name, label);
+            return;
+          }
+        } catch {
+          // fallback to simulated
+        }
+      }
       setRealFile(null);
       runAnalysis(null, name, label);
     },
@@ -769,25 +787,41 @@ export default function Demo() {
 
             {/* Sample Files */}
             <div>
-              <p className="text-sm text-slate-400 mb-3">Or try a sample (simulated analysis):</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-slate-400">Or try pre-generated test samples:</p>
+                <span className="text-[11px] text-cyan-400 font-mono">sample_data/</span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {sampleFiles
-                  .filter((f) => modality === "both" || f.type === modality)
+                  .filter((f) => modality === "both" || f.type === modality || f.type === "both")
                   .map((file) => (
                     <button
                       key={file.name}
-                      onClick={() => handleSampleClick(file.name, file.label)}
+                      onClick={() => handleSampleClick(file.name, file.label, file.path)}
                       disabled={isAnalyzing}
-                      className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center gap-2.5 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-cyan-500/30 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
                     >
                       {file.type === "audio" ? (
-                        <FileAudio className="w-4 h-4 text-cyan-400 shrink-0" />
+                        <FileAudio className="w-4 h-4 text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
+                      ) : file.type === "video" ? (
+                        <Film className="w-4 h-4 text-blue-400 shrink-0 group-hover:scale-110 transition-transform" />
                       ) : (
-                        <Film className="w-4 h-4 text-blue-400 shrink-0" />
+                        <ImageIcon className="w-4 h-4 text-violet-400 shrink-0 group-hover:scale-110 transition-transform" />
                       )}
-                      <div className="min-w-0">
-                        <p className="text-sm text-white truncate">{file.name}</p>
-                        <p className="text-xs text-slate-500">{file.desc}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <p className="text-sm text-white truncate font-medium">{file.name}</p>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0 ${
+                              file.label === "Real"
+                                ? "bg-emerald-500/20 text-emerald-300"
+                                : "bg-red-500/20 text-red-300"
+                            }`}
+                          >
+                            {file.label}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 truncate">{file.desc}</p>
                       </div>
                     </button>
                   ))}
